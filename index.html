@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MythosAI — Endless AI Text RPG</title>
+    <!-- Tailwind CSS for modern, instant layouts -->
+    <script src="https://tailwindcss.com"></script>
+    <!-- Cinematic fonts for a premium game feel -->
+    <link href="https://googleapis.com" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #060913; }
+        .fantasy-heading { font-family: 'Cinzel', serif; tracking-width: 0.1em; }
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.3); }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 99px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #334155; }
+        @keyframes subtle-pulse { 0%, 100% { opacity: 0.2; } 50% { opacity: 0.4; } }
+        .bg-glow { animation: subtle-pulse 8s ease-in-out infinite; }
+    </style>
+</head>
+<body class="text-slate-200 min-h-screen flex flex-col antialiased selection:bg-purple-500/30">
+
+    <!-- AMBIENT BACKGROUND GLOWS -->
+    <div class="fixed inset-0 pointer-events-none overflow-hidden z-0">
+        <div class="absolute -top-40 -left-40 w-96 h-96 bg-purple-600/10 rounded-full blur-[128px] bg-glow"></div>
+        <div class="absolute top-1/2 -right-40 w-96 h-96 bg-indigo-600/10 rounded-full blur-[128px] bg-glow" style="animation-delay: 4s;"></div>
+    </div>
+
+    <!-- MAIN CONTAINER -->
+    <div class="relative z-10 flex-1 flex flex-col">
+        
+        <!-- ========================================================= -->
+        <!-- SCREEN 1: LOGIN ENGINE -->
+        <!-- ========================================================= -->
+        <div id="login-screen" class="fixed inset-0 bg-[#04060d] z-50 flex items-center justify-center p-4">
+            <div class="w-full max-w-md space-y-8 text-center">
+                <div class="space-y-2">
+                    <h1 class="fantasy-heading text-5xl font-extrabold tracking-widest text-transparent bg-clip-text bg-gradient-to-b from-white via-slate-200 to-slate-500">MYTHOS AI</h1>
+                    <p class="text-xs tracking-[0.3em] font-medium text-purple-400/80 uppercase">Your Choices. Your Universe.</p>
+                </div>
+
+                <div class="bg-slate-900/40 border border-slate-800/80 p-8 rounded-2xl backdrop-blur-xl shadow-2xl space-y-6">
+                    <!-- Google Single Sign On Mock -->
+                    <button onclick="switchScreen('dashboard-screen')" class="w-full bg-slate-100 text-slate-950 font-semibold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-white transition-all duration-200 active:scale-[0.98] text-sm shadow-lg shadow-white/5">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                        Continue with Google
+                    </button>
+                    
+                    <div class="flex items-center my-4 before:flex-1 before:border-t before:border-slate-800/60 after:flex-1 after:border-t after:border-slate-800/60 text-[10px] text-slate-500 uppercase tracking-widest px-2">or</div>
+                    
+                    <div class="space-y-4">
+                        <input type="email" placeholder="Enter your email address" class="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-3.5 text-sm focus:outline-none focus:border-purple-500/80 focus:ring-1 focus:ring-purple-500/30 transition-all text-slate-200 placeholder-slate-600">
+                        <button onclick="switchScreen('dashboard-screen')" class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 font-semibold py-3.5 px-4 rounded-xl hover:from-purple-500 hover:to-indigo-500 transition-all duration-300 shadow-xl shadow-purple-900/30 active:scale-[0.98] text-sm tracking-wide">Enter the Nexus</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================================= -->
+        <!-- SCREEN 2: UNIVERSE SELECTION HUB -->
+        <!-- ========================================================= -->
+        <div id="dashboard-screen" class="hidden w-full max-w-5xl mx-auto px-4 py-12 flex-1 flex flex-col justify-center">
+            <header class="text-center mb-12 space-y-3">
+                <h1 class="fantasy-heading text-3xl md:text-4xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-400">CHOOSE A REALM</h1>
+                <p class="text-slate-400 text-xs md:text-sm max-w-md mx-auto leading-relaxed">Each universe dictates its own unique item drops, combat rules, and structural long-term dynamic narrative branches.</p>
+            </header>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto w-full">
+                <!-- Universe 1: Cyberpunk -->
+                <div onclick="selectUniverse('Neo-Tokyo 2099', 'Sci-Fi / Cyberpunk')" class="group relative bg-slate-900/20 border border-slate-800/60 hover:border-purple-500/50 rounded-2xl overflow-hidden cursor-pointer shadow-xl transition-all duration-300 hover:-translate-y-1 backdrop-blur-sm">
+                    <div class="h-40 bg-gradient-to-br from-purple-950/60 to-slate-950 p-5 flex flex-col justify-between border-b border-slate-800/40">
+                        <span class="w-fit px-2 py-0.5 bg-purple-500/10 border border-purple-400/20 text-purple-400 text-[9px] font-bold uppercase tracking-widest rounded-md">Module 01</span>
+                        <h3 class="fantasy-heading text-xl font-bold text-slate-100 group-hover:text-purple-400 transition-colors">Neo-Tokyo 2099</h3>
+                    </div>
+                    <div class="p-5">
+                        <p class="text-xs text-slate-400 leading-relaxed">Dodge corrupt corporate tactical squads, extract encrypted mainframe nodes, and manage dangerous synthetic augmentations.</p>
+                    </div>
+                </div>
+
+                <!-- Universe 2: Dark Fantasy -->
+                <div onclick="selectUniverse('Elfridge Chronicles', 'Grimdark / Fantasy')" class="group relative bg-slate-900/20 border border-slate-800/60 hover:border-amber-500/50 rounded-2xl overflow-hidden cursor-pointer shadow-xl transition-all duration-300 hover:-translate-y-1 backdrop-blur-sm">
+                    <div class="h-40 bg-gradient-to-br from-amber-950/40 to-slate-950 p-5 flex flex-col justify-between border-b border-slate-800/40">
+                        <span class="w-fit px-2 py-0.5 bg-amber-500/10 border border-amber-400/20 text-amber-400 text-[9px] font-bold uppercase tracking-widest rounded-md">Module 02</span>
+                        <h3 class="fantasy-heading text-xl font-bold text-slate-100 group-hover:text-amber-400 transition-colors">Elfridge Chronicles</h3>
+                    </div>
+                    <div class="p-5">
+                        <p class="text-xs text-slate-400 leading-relaxed">Survive a crumbling kingdom where blood magic poisons the soul, ancient relics carry curses, and beasts watch from the mist.</p>
+                    </div>
+                </div>
+
+                <!-- Universe 3: Survival -->
+                <div onclick="selectUniverse('Vault 404', 'Post-Apocalyptic')" class="group relative bg-slate-900/20 border border-slate-800/60 hover:border-emerald-500/50 rounded-2xl overflow-hidden cursor-pointer shadow-xl transition-all duration-300 hover:-translate-y-1 backdrop-blur-sm">
+                    <div class="h-40 bg-gradient-to-br from-emerald-950/40 to-slate-950 p-5 flex flex-col justify-between border-b border-slate-800/40">
+                        <span class="w-fit px-2 py-0.5 bg-emerald-500/10 border border-emerald-400/20 text-emerald-400 text-[9px] font-bold uppercase tracking-widest rounded-md">Module 03</span>
+                        <h3 class="fantasy-heading text-xl font-bold text-slate-100 group-hover:text-emerald-400 transition-colors">Vault 404</h3>
+                    </div>
+                    <div class="p-5">
+                        <p class="text-xs text-slate-400 leading-relaxed">Navigate deep subterranean military silos, clean structural reactor hazards, and ration radioactive supplies against surface mutants.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================================= -->
+        <!-- SCREEN 3: HIGH-FIDELITY IMMERSIVE RPG CONSOLE -->
+        <!-- ========================================================= -->
+        <div id="gameplay-screen" class="hidden w-full max-w-6xl mx-auto flex-1 flex flex-col md:flex-row h-screen max-h-screen overflow-hidden p-3 md:p-6 gap-4">
+            
+            <!-- Left Panel: Real-time Live State HUD -->
+            <aside class="w-full md:w-64 bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 flex flex-row md:flex-col gap-4 md:gap-6 shrink-0 backdrop-blur-xl shadow-2xl justify-between md:justify-start">
+                <div>
