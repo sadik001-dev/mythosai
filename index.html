@@ -1,112 +1,386 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MythosAI — Endless AI Text RPG</title>
-    <!-- Tailwind CSS for modern, instant layouts -->
-    <script src="https://tailwindcss.com"></script>
-    <!-- Cinematic fonts for a premium game feel -->
-    <link href="https://googleapis.com" rel="stylesheet">
-    <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #060913; }
-        .fantasy-heading { font-family: 'Cinzel', serif; tracking-width: 0.1em; }
-        .custom-scroll::-webkit-scrollbar { width: 6px; }
-        .custom-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.3); }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 99px; }
-        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #334155; }
-        @keyframes subtle-pulse { 0%, 100% { opacity: 0.2; } 50% { opacity: 0.4; } }
-        .bg-glow { animation: subtle-pulse 8s ease-in-out infinite; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0d0f">
+<title>MythosAI — Endless AI Text RPG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d0d0f;--panel:#141417;--bot:#1a1c22;--line:rgba(236,232,223,.1);--text:#ece8df;--mute:#9b978d;
+--hp:#ff4d4d;--tok:#3ddc84;--gold:#ffc83d;--inv:#7dd3fc;
+--sans:'Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:400 1rem/1.6 var(--sans);-webkit-font-smoothing:antialiased;overflow:hidden}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;opacity:.35;
+background:repeating-linear-gradient(0deg,rgba(0,0,0,.35) 0 1px,transparent 1px 3px)}
+::selection{background:rgba(236,232,223,.25)}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0}
+:focus-visible{outline:2px solid var(--text);outline-offset:3px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.screen{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow-y:auto;
+padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px);scrollbar-color:#2a2c33 transparent}
+.screen[hidden]{display:none!important}
+.link{color:var(--mute);text-decoration:underline;text-underline-offset:4px;transition:color .2s}
+.link:hover{color:var(--text)}
+.tokn{color:var(--tok);font:700 1em var(--mono)}
+
+/* login */
+.box{width:100%;max-width:26rem;margin:auto;padding:1.5rem;text-align:center}
+.logo{margin:0;font-size:clamp(2.25rem,9vw,3.25rem);font-weight:800;letter-spacing:.14em;line-height:1.1;text-shadow:0 0 32px rgba(236,232,223,.2)}
+.tag{margin:.9rem 0 2rem;font:500 .8125rem/1.5 var(--mono);color:var(--mute)}
+.panel{display:grid;gap:1rem;padding:1.5rem;background:var(--panel);border:1px solid var(--line);border-radius:1.5rem;box-shadow:0 24px 60px rgba(0,0,0,.55)}
+.btn{display:flex;align-items:center;justify-content:center;gap:.6rem;width:100%;min-height:3rem;padding:0 1.25rem;border-radius:.9rem;font-size:.9375rem;font-weight:700;transition:transform .15s,background .2s,border-color .2s}
+.btn:active{transform:scale(.98)}
+.btn.ghost{border:1px solid var(--line);background:rgba(255,255,255,.03)}
+.btn.ghost:hover{border-color:rgba(236,232,223,.4);background:rgba(255,255,255,.07)}
+.btn.light{background:var(--text);color:#111}
+.btn.light:hover{background:#fff}
+.or{display:flex;align-items:center;gap:.75rem;font:500 .75rem var(--mono);color:var(--mute)}
+.or span{flex:1;border-top:1px solid var(--line)}
+.form{display:grid;gap:.5rem}
+.field{width:100%;min-height:3rem;padding:.75rem 1rem;background:#0f0f12;border:1px solid var(--line);border-radius:.9rem;transition:border-color .2s,box-shadow .2s}
+.field::placeholder{color:#6f6c64}
+.field:focus{outline:0;border-color:rgba(236,232,223,.55);box-shadow:0 0 0 4px rgba(236,232,223,.08)}
+.err{min-height:1.4rem;margin:0;text-align:left;font-size:.8125rem;color:#ff9a9a}
+
+/* realms */
+.wrap{width:100%;max-width:64rem;margin:auto;padding:2.5rem 1.25rem;text-align:center}
+.title{margin:0;font-size:clamp(1.5rem,5vw,2.25rem);font-weight:800;letter-spacing:.1em}
+.sub{margin:.6rem auto 0;max-width:30rem;color:var(--mute);font-size:.9375rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1.25rem;margin-top:2rem}
+.card{display:flex;flex-direction:column;text-align:left;overflow:hidden;background:var(--panel);border:1px solid var(--line);border-radius:1.5rem;transition:transform .2s,border-color .2s,box-shadow .2s}
+.card:hover,.card:focus-visible{transform:translateY(-4px);border-color:var(--ac);box-shadow:0 14px 40px -14px var(--ac)}
+.card .top{display:flex;flex-direction:column;justify-content:space-between;height:8rem;padding:1.25rem;border-bottom:1px solid var(--line);background:linear-gradient(135deg,var(--g),transparent 75%)}
+.card .gen{font:500 .75rem var(--mono);color:var(--ac)}
+.card .name{font-size:1.25rem;font-weight:700}
+.card .desc{padding:1.25rem;color:var(--mute);font-size:.9375rem;line-height:1.6}
+
+/* game */
+#game{overflow:hidden}
+.top-bar{flex:none;display:flex;align-items:center;gap:.75rem;padding:.4rem max(1rem,calc((100% - 800px)/2));border-bottom:1px solid var(--line);background:rgba(13,13,15,.9)}
+.back{min-height:2.75rem;font-size:.875rem}
+.top-bar h2{flex:1;min-width:0;margin:0;overflow:hidden;text-align:center;text-overflow:ellipsis;white-space:nowrap;font-size:1rem;font-weight:700;letter-spacing:.06em}
+.pill{padding:.25rem .75rem;border:1px solid var(--line);border-radius:99px;font:500 .8125rem var(--mono);color:var(--mute)}
+#log{flex:1;min-height:0;display:flex;flex-direction:column;gap:1.5rem;overflow-y:auto;scroll-behavior:smooth;
+padding:1.5rem max(1rem,calc((100% - 800px)/2)) 1rem;scrollbar-color:#2a2c33 transparent}
+.msg{padding:1.25rem 1.5rem;border-radius:1.5rem;animation:in .4s ease both;overflow-wrap:anywhere}
+.msg p{margin:0}
+.msg.bot{align-self:stretch;background:var(--bot);border:1px solid var(--line);border-bottom-left-radius:.5rem}
+.msg.me{align-self:flex-end;max-width:85%;font-weight:600;background:linear-gradient(135deg,#3b3f52,#2a2d3b);border-bottom-right-radius:.5rem}
+.msg.sys{align-self:center;padding:.4rem .9rem;border-radius:99px;background:rgba(255,255,255,.05);font:500 .8125rem/1.5 var(--mono);color:var(--mute);text-align:center}
+.story{font-weight:400}
+.story+.choice{margin-top:.9rem}
+.choice{padding-left:.9rem;border-left:3px solid var(--gold);color:var(--gold);font-weight:500}
+.loot{padding:.1em .45em;border-radius:.4rem;background:rgba(255,255,255,.06);font:700 .9em var(--mono);color:var(--r);-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.COMMON{--r:#c9c5bb}.UNCOMMON{--r:#2dd4bf}.RARE{--r:#60a5fa}.EPIC{--r:#c084fc}.LEGENDARY{--r:#fb923c}
+.status{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:1rem;margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px dashed var(--line);font-family:var(--mono);line-height:1.4}
+.st{min-width:0}
+.hp{--c:var(--hp)}.tok{--c:var(--tok)}.inv{--c:var(--inv)}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;font-size:.75rem;color:var(--mute)}
+.row strong{font-size:1rem;font-weight:700;color:var(--c)}
+.row small{font-size:.75rem;font-weight:500;color:var(--mute)}
+.bar{height:8px;margin-top:.45rem;overflow:hidden;border-radius:99px;background:rgba(255,255,255,.07)}
+.bar i{display:block;height:100%;width:calc(var(--v)*100%);background:repeating-linear-gradient(90deg,var(--c) 0 6px,transparent 6px 8px);animation:fill .9s cubic-bezier(.2,.8,.2,1) both}
+.low strong{animation:blink 1s steps(2) infinite}
+.names{margin-top:.45rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.75rem;color:var(--mute)}
+.dots{display:inline-flex;gap:.35rem;margin-right:.6rem;vertical-align:middle}
+.dots i{width:.5rem;height:.5rem;border-radius:50%;background:var(--mute);animation:bob 1s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+.wait{color:var(--mute)}
+@keyframes in{from{opacity:0;transform:translateY(10px)}}
+@keyframes fill{from{width:0}}
+@keyframes blink{50%{opacity:.35}}
+@keyframes bob{50%{transform:translateY(-4px);opacity:.5}}
+@media(max-width:520px){.status{grid-template-columns:1fr 1fr}.st.inv{grid-column:1/-1}.msg{padding:1.1rem 1.15rem}}
+
+/* composer */
+.dock{flex:none;padding:.25rem max(1rem,calc((100% - 800px)/2)) 1rem;background:linear-gradient(to top,var(--bg) 75%,transparent)}
+.chips{display:flex;gap:.5rem;padding:.25rem 0 .75rem;overflow-x:auto;scrollbar-width:none}
+.chip{flex:none;padding:.5rem .95rem;border:1px solid var(--line);border-radius:99px;font-size:.875rem;color:var(--mute);transition:color .2s,border-color .2s,background .2s}
+.chip:hover{color:var(--text);border-color:rgba(236,232,223,.4);background:rgba(255,255,255,.04)}
+.composer{display:flex;align-items:flex-end;gap:.5rem;padding:.5rem .5rem .5rem 1.15rem;background:#17181d;border:1px solid var(--line);border-radius:1.75rem;box-shadow:0 12px 40px rgba(0,0,0,.6);transition:border-color .2s,box-shadow .2s}
+.composer:focus-within{border-color:rgba(236,232,223,.5);box-shadow:0 12px 40px rgba(0,0,0,.6),0 0 0 4px rgba(236,232,223,.07)}
+#act-in{flex:1;min-width:0;max-height:9rem;padding:.6rem 0;resize:none;background:none;border:0;outline:0;line-height:1.5}
+#act-in::placeholder{color:#6f6c64}
+#send{flex:none;display:grid;place-items:center;width:2.75rem;height:2.75rem;border-radius:50%;background:var(--text);color:#111;transition:transform .15s,opacity .2s}
+#send:hover:not(:disabled){transform:scale(1.07)}
+#send:disabled{opacity:.35;cursor:not-allowed}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
 </head>
-<body class="text-slate-200 min-h-screen flex flex-col antialiased selection:bg-purple-500/30">
+<body>
 
-    <!-- AMBIENT BACKGROUND GLOWS -->
-    <div class="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div class="absolute -top-40 -left-40 w-96 h-96 bg-purple-600/10 rounded-full blur-[128px] bg-glow"></div>
-        <div class="absolute top-1/2 -right-40 w-96 h-96 bg-indigo-600/10 rounded-full blur-[128px] bg-glow" style="animation-delay: 4s;"></div>
+<!-- SCREEN 1: LOGIN -->
+<main id="login" class="screen">
+  <div class="box">
+    <h1 class="logo">MYTHOS AI</h1>
+    <p class="tag">Your Choices. Your Story. Your Universe.</p>
+    <div class="panel">
+      <button id="g-btn" type="button" class="btn ghost">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Continue with Google
+      </button>
+      <div class="or"><span></span>or<span></span></div>
+      <form id="login-form" class="form" novalidate>
+        <label for="email" class="sr">Email address</label>
+        <input id="email" class="field" type="email" autocomplete="email" inputmode="email" placeholder="Enter your email address">
+        <p id="err" class="err" role="alert"></p>
+        <button type="submit" class="btn light">Enter the Nexus</button>
+      </form>
     </div>
+  </div>
+</main>
 
-    <!-- MAIN CONTAINER -->
-    <div class="relative z-10 flex-1 flex flex-col">
-        
-        <!-- ========================================================= -->
-        <!-- SCREEN 1: LOGIN ENGINE -->
-        <!-- ========================================================= -->
-        <div id="login-screen" class="fixed inset-0 bg-[#04060d] z-50 flex items-center justify-center p-4">
-            <div class="w-full max-w-md space-y-8 text-center">
-                <div class="space-y-2">
-                    <h1 class="fantasy-heading text-5xl font-extrabold tracking-widest text-transparent bg-clip-text bg-gradient-to-b from-white via-slate-200 to-slate-500">MYTHOS AI</h1>
-                    <p class="text-xs tracking-[0.3em] font-medium text-purple-400/80 uppercase">Your Choices. Your Universe.</p>
-                </div>
+<!-- SCREEN 2: REALM HUB -->
+<main id="dashboard" class="screen" hidden>
+  <div class="wrap">
+    <h2 class="title">CHOOSE A REALM</h2>
+    <p class="sub">Each universe has its own item drops, combat rules and branching story.</p>
+    <p class="sub"><b class="tokn">20</b>/20 Action Tokens left today</p>
+    <p class="sub"><button id="signout" type="button" class="link">Sign out</button></p>
+    <div class="grid">
+      <button type="button" data-realm="neo" class="card" style="--ac:#c084fc;--g:rgba(192,132,252,.2)">
+        <span class="top"><span class="gen">Sci-Fi / Cyberpunk</span><span class="name">Neo-Tokyo 2099</span></span>
+        <span class="desc">Dodge corrupt corporate tactical squads, extract encrypted mainframe nodes, and manage dangerous synthetic augmentations.</span>
+      </button>
+      <button type="button" data-realm="elf" class="card" style="--ac:#fb923c;--g:rgba(251,146,60,.18)">
+        <span class="top"><span class="gen">Grimdark / Fantasy</span><span class="name">Elfridge Chronicles</span></span>
+        <span class="desc">Survive a crumbling kingdom where blood magic poisons the soul, ancient relics carry curses, and beasts watch from the mist.</span>
+      </button>
+      <button type="button" data-realm="vault" class="card" style="--ac:#a3e635;--g:rgba(163,230,53,.16)">
+        <span class="top"><span class="gen">Post-Apocalyptic</span><span class="name">Vault 404</span></span>
+        <span class="desc">Navigate deep subterranean military silos, clean structural reactor hazards, and ration radioactive supplies against surface mutants.</span>
+      </button>
+    </div>
+  </div>
+</main>
 
-                <div class="bg-slate-900/40 border border-slate-800/80 p-8 rounded-2xl backdrop-blur-xl shadow-2xl space-y-6">
-                    <!-- Google Single Sign On Mock -->
-                    <button onclick="switchScreen('dashboard-screen')" class="w-full bg-slate-100 text-slate-950 font-semibold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-white transition-all duration-200 active:scale-[0.98] text-sm shadow-lg shadow-white/5">
-                        <svg class="w-4 h-4" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-                        Continue with Google
-                    </button>
-                    
-                    <div class="flex items-center my-4 before:flex-1 before:border-t before:border-slate-800/60 after:flex-1 after:border-t after:border-slate-800/60 text-[10px] text-slate-500 uppercase tracking-widest px-2">or</div>
-                    
-                    <div class="space-y-4">
-                        <input type="email" placeholder="Enter your email address" class="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-3.5 text-sm focus:outline-none focus:border-purple-500/80 focus:ring-1 focus:ring-purple-500/30 transition-all text-slate-200 placeholder-slate-600">
-                        <button onclick="switchScreen('dashboard-screen')" class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 font-semibold py-3.5 px-4 rounded-xl hover:from-purple-500 hover:to-indigo-500 transition-all duration-300 shadow-xl shadow-purple-900/30 active:scale-[0.98] text-sm tracking-wide">Enter the Nexus</button>
-                    </div>
-                </div>
-            </div>
-        </div>
+<!-- SCREEN 3: GAME CONSOLE -->
+<main id="game" class="screen" hidden>
+  <header class="top-bar">
+    <button id="back" type="button" class="link back">← Realms</button>
+    <h2 id="realm-name"></h2>
+    <span class="pill"><b class="tokn">20</b> tokens</span>
+  </header>
+  <div id="log" role="log" aria-label="Story"></div>
+  <div class="dock">
+    <div class="chips">
+      <button type="button" class="chip" data-act="Look around">Look around</button>
+      <button type="button" class="chip" data-act="Move forward carefully">Move forward carefully</button>
+      <button type="button" class="chip" data-act="Search for supplies">Search for supplies</button>
+    </div>
+    <form id="act" class="composer">
+      <label for="act-in" class="sr">Your action</label>
+      <textarea id="act-in" rows="1" maxlength="200" enterkeyhint="send" autocomplete="off" placeholder="What do you do?"></textarea>
+      <button id="send" type="submit" aria-label="Send action"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+    </form>
+  </div>
+</main>
 
-        <!-- ========================================================= -->
-        <!-- SCREEN 2: UNIVERSE SELECTION HUB -->
-        <!-- ========================================================= -->
-        <div id="dashboard-screen" class="hidden w-full max-w-5xl mx-auto px-4 py-12 flex-1 flex flex-col justify-center">
-            <header class="text-center mb-12 space-y-3">
-                <h1 class="fantasy-heading text-3xl md:text-4xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-400">CHOOSE A REALM</h1>
-                <p class="text-slate-400 text-xs md:text-sm max-w-md mx-auto leading-relaxed">Each universe dictates its own unique item drops, combat rules, and structural long-term dynamic narrative branches.</p>
-            </header>
+<script>
+(() => {
+"use strict";
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const DAILY = 20, RAR = ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"];
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto w-full">
-                <!-- Universe 1: Cyberpunk -->
-                <div onclick="selectUniverse('Neo-Tokyo 2099', 'Sci-Fi / Cyberpunk')" class="group relative bg-slate-900/20 border border-slate-800/60 hover:border-purple-500/50 rounded-2xl overflow-hidden cursor-pointer shadow-xl transition-all duration-300 hover:-translate-y-1 backdrop-blur-sm">
-                    <div class="h-40 bg-gradient-to-br from-purple-950/60 to-slate-950 p-5 flex flex-col justify-between border-b border-slate-800/40">
-                        <span class="w-fit px-2 py-0.5 bg-purple-500/10 border border-purple-400/20 text-purple-400 text-[9px] font-bold uppercase tracking-widest rounded-md">Module 01</span>
-                        <h3 class="fantasy-heading text-xl font-bold text-slate-100 group-hover:text-purple-400 transition-colors">Neo-Tokyo 2099</h3>
-                    </div>
-                    <div class="p-5">
-                        <p class="text-xs text-slate-400 leading-relaxed">Dodge corrupt corporate tactical squads, extract encrypted mainframe nodes, and manage dangerous synthetic augmentations.</p>
-                    </div>
-                </div>
+// Browser storage can fail (private mode), so every call is guarded.
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("mythos:" + k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("mythos:" + k, JSON.stringify(v)); } catch {} }
+};
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
-                <!-- Universe 2: Dark Fantasy -->
-                <div onclick="selectUniverse('Elfridge Chronicles', 'Grimdark / Fantasy')" class="group relative bg-slate-900/20 border border-slate-800/60 hover:border-amber-500/50 rounded-2xl overflow-hidden cursor-pointer shadow-xl transition-all duration-300 hover:-translate-y-1 backdrop-blur-sm">
-                    <div class="h-40 bg-gradient-to-br from-amber-950/40 to-slate-950 p-5 flex flex-col justify-between border-b border-slate-800/40">
-                        <span class="w-fit px-2 py-0.5 bg-amber-500/10 border border-amber-400/20 text-amber-400 text-[9px] font-bold uppercase tracking-widest rounded-md">Module 02</span>
-                        <h3 class="fantasy-heading text-xl font-bold text-slate-100 group-hover:text-amber-400 transition-colors">Elfridge Chronicles</h3>
-                    </div>
-                    <div class="p-5">
-                        <p class="text-xs text-slate-400 leading-relaxed">Survive a crumbling kingdom where blood magic poisons the soul, ancient relics carry curses, and beasts watch from the mist.</p>
-                    </div>
-                </div>
+// Screens use the `hidden` attribute (CSS: .screen[hidden]{display:none!important}), so exactly one is ever visible.
+const screens = $$(".screen");
+const show = id => screens.forEach(s => { s.hidden = s.id !== id; });
 
-                <!-- Universe 3: Survival -->
-                <div onclick="selectUniverse('Vault 404', 'Post-Apocalyptic')" class="group relative bg-slate-900/20 border border-slate-800/60 hover:border-emerald-500/50 rounded-2xl overflow-hidden cursor-pointer shadow-xl transition-all duration-300 hover:-translate-y-1 backdrop-blur-sm">
-                    <div class="h-40 bg-gradient-to-br from-emerald-950/40 to-slate-950 p-5 flex flex-col justify-between border-b border-slate-800/40">
-                        <span class="w-fit px-2 py-0.5 bg-emerald-500/10 border border-emerald-400/20 text-emerald-400 text-[9px] font-bold uppercase tracking-widest rounded-md">Module 03</span>
-                        <h3 class="fantasy-heading text-xl font-bold text-slate-100 group-hover:text-emerald-400 transition-colors">Vault 404</h3>
-                    </div>
-                    <div class="p-5">
-                        <p class="text-xs text-slate-400 leading-relaxed">Navigate deep subterranean military silos, clean structural reactor hazards, and ration radioactive supplies against surface mutants.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
+// NOTE: this daily limit is client-side only. Enforce the real limit on your server.
+let tk = store.get("tokens", null);
+const today = () => new Date().toISOString().slice(0, 10);
+function tokens() {
+  if (!tk || typeof tk.left !== "number" || tk.day !== today()) { tk = { day: today(), left: DAILY }; store.set("tokens", tk); }
+  return tk.left;
+}
+function paintTokens() { const n = tokens(); $$(".tokn").forEach(e => { e.textContent = n; }); }
 
-        <!-- ========================================================= -->
-        <!-- SCREEN 3: HIGH-FIDELITY IMMERSIVE RPG CONSOLE -->
-        <!-- ========================================================= -->
-        <div id="gameplay-screen" class="hidden w-full max-w-6xl mx-auto flex-1 flex flex-col md:flex-row h-screen max-h-screen overflow-hidden p-3 md:p-6 gap-4">
-            
-            <!-- Left Panel: Real-time Live State HUD -->
-            <aside class="w-full md:w-64 bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 flex flex-row md:flex-col gap-4 md:gap-6 shrink-0 backdrop-blur-xl shadow-2xl justify-between md:justify-start">
-                <div>
+/* ---------- LOGIN (self-contained: runs before any game code) ---------- */
+// Demo sign-in only. Swap for Supabase auth in production.
+const email = $("#email"), err = $("#err");
+function signIn() {
+  store.set("signedIn", true);
+  show("dashboard");                 // switch screens FIRST so nothing after it can block the transition
+  try { paintTokens(); } catch {}
+}
+$("#login-form").addEventListener("submit", e => {
+  e.preventDefault();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) {
+    err.textContent = "Enter a valid email address, like you@example.com.";
+    email.setAttribute("aria-invalid", "true"); email.focus(); return;
+  }
+  err.textContent = ""; email.removeAttribute("aria-invalid"); signIn();
+});
+email.addEventListener("input", () => { err.textContent = ""; email.removeAttribute("aria-invalid"); });
+$("#g-btn").addEventListener("click", signIn);
+$("#signout").addEventListener("click", () => { store.set("signedIn", false); show("login"); });
+paintTokens();
+if (store.get("signedIn", false)) show("dashboard");
+
+/* ---------- REALMS ---------- */
+const R = {
+  neo: { name: "Neo-Tokyo 2099", genre: "Sci-Fi / Cyberpunk",
+    intro: "Rain hisses on neon-lit steel as your neural link flickers awake in a back alley. Above you, a corporate strike squad has already traced your signal.",
+    place: ["a rain-slick alley under glitching holo-ads", "a humming server catacomb", "a crowded noodle bazaar"],
+    foe: "A corporate tactical squad",
+    loot: [["COMMON", "Neural Patch"], ["RARE", "Encrypted Data Shard"], ["EPIC", "Ghost Cloak Chip"]],
+    beats: ["Drones sweep past overhead and you hold your breath until they fade.", "A street vendor whispers that the mainframe node moved last night."],
+    ask: ["Do you stand your ground against the squad, or dive into the flooded sewers and pray you can hold your breath?", "Do you hack the vault lock and gamble your life, or run with their lasers burning at your back?"] },
+  elf: { name: "Elfridge Chronicles", genre: "Grimdark / Fantasy",
+    intro: "Mist crawls between the dead oaks of Elfridge while the kingdom rots from within. Something in the fog has noticed your lantern.",
+    place: ["a moss-choked ruin", "a bone-white forest road", "a chapel gone to rot"],
+    foe: "A blood-mad wolf pack",
+    loot: [["COMMON", "Hemlock Salve"], ["RARE", "Cursed Silver Ring"], ["EPIC", "Rusted Relic Key"], ["LEGENDARY", "Shadow Dagger"]],
+    beats: ["The bells toll though no one is left to ring them.", "Your shadow lingers a moment too long behind you."],
+    ask: ["Do you swing your blade at the wolves, or climb the chapel tower and risk the rotten stairs giving way?", "Do you drink the strange black salve and trust it, or bleed out slowly in the mist?"] },
+  vault: { name: "Vault 404", genre: "Post-Apocalyptic",
+    intro: "The blast door groans shut behind you, and Vault 404 reeks of ozone and old rust. Deep in the pipes, the reactor whispers a warning.",
+    place: ["a flooded reactor corridor", "a dusty armory silo", "a collapsed mess hall"],
+    foe: "A pack of surface mutants",
+    loot: [["COMMON", "Water Ration"], ["UNCOMMON", "Fuse Cell"], ["RARE", "Geiger Badge"]],
+    beats: ["A distant alarm cycles twice and then goes silent.", "The floor trembles as something heavy shifts far below."],
+    ask: ["Do you seal the reactor door and trap yourself with the mutants, or flee across the flooded corridor and risk the radiation?", "Do you pull the red lever and gamble the whole vault, or die slowly in the dark?"] }
+};
+// Sent to your backend so the model follows the same narrator rules as the offline narrator.
+const RULES = "Reply in at most 3 sentences. Wrap any item the player finds as [RARITY] Item Name, using COMMON, UNCOMMON, RARE, EPIC or LEGENDARY, with the name right before punctuation. The last sentence must be a dramatic life-or-death choice phrased as a question.";
+
+let cur = null, hp = 100, inv = [], hist = [], busy = false;
+
+/* ---------- NARRATOR RULES ---------- */
+const LOOT = /(\[(?:COMMON|UNCOMMON|RARE|EPIC|LEGENDARY)\][^.!?,;\n]*)/;
+function gain(rar, name) {
+  name = String(name).trim();
+  if (name && !inv.some(i => i[1] === name)) inv.push([RAR.includes(rar) ? rar : "COMMON", name]);
+}
+// Enforces: max 3 sentences, and the final sentence is a life-or-death choice (a question).
+function shape(text, r) {
+  let s = (String(text).replace(/\s+/g, " ").trim().match(/[^.!?]+[.!?]+["”’)]*|[^.!?]+$/g) || []).map(x => x.trim()).filter(Boolean).slice(0, 3);
+  const q = s.length && /\?["”’)]*$/.test(s[s.length - 1]);
+  const choice = q ? s.pop() : pick(r.ask), story = s.slice(0, 2).join(" ");
+  const loot = [...(story).split(LOOT).filter((_, i) => i % 2)].map(t => [t.match(/^\[(\w+)\]/)[1], t.replace(/^\[\w+\]\s*/, "")]);
+  return { story, choice, loot };
+}
+// Offline narrator, used when the backend is unreachable. Always exactly 3 sentences.
+function offline(r, a) {
+  const act = a.replace(/[.!?]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60), roll = Math.random();
+  const s1 = `Your move, “${act}”, carries you into ${pick(r.place)}.`;
+  let s2, hpd = 0;
+  if (roll < .2) { hpd = -(8 + Math.floor(Math.random() * 11)); s2 = `${r.foe} strikes from the dark and tears away ${-hpd} health.`; }
+  else if (roll < .45) { const [rar, n] = pick(r.loot); s2 = `Among the debris you find [${rar}] ${n}.`; }
+  else s2 = pick(r.beats);
+  return { story: `${s1} ${s2} ${pick(r.ask)}`, hp: hpd };
+}
+async function narrate(action) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const r = await fetch("/api/game-turn", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ genre: cur.genre, player_action: action, current_story: hist.slice(-6).join("\n").slice(-1500), rules: RULES }),
+      signal: ctl.signal
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json();
+    if (typeof d.story !== "string" || !d.story.trim()) throw new Error("empty story");
+    return { story: d.story, health: typeof d.health === "number" ? d.health : null, items: Array.isArray(d.inventory) ? d.inventory : null };
+  } catch {
+    await new Promise(res => setTimeout(res, 600));
+    return offline(cur, action);
+  } finally { clearTimeout(t); }
+}
+
+/* ---------- RENDERING ---------- */
+function push(node) { const log = $("#log"); log.appendChild(node); log.scrollTop = log.scrollHeight; return node; }
+const say = (cls, text) => push(el("div", "msg " + cls, text)); // textContent only: AI output is untrusted
+
+function stat(cls, label, val, max, frac) {
+  const d = el("div", "st " + cls), row = el("div", "row"), s = el("strong", null, String(val));
+  s.append(el("small", null, "/" + max)); row.append(el("span", null, label), s);
+  const bar = el("div", "bar"), i = el("i"); i.style.setProperty("--v", Math.max(0, Math.min(1, frac)));
+  bar.append(i); d.append(row, bar); return d;
+}
+function statusBar() {
+  const n = tokens(), b = el("div", "status"), ie = el("div", "st inv"), row = el("div", "row"), c = el("strong", null, String(inv.length));
+  row.append(el("span", null, "INV"), c);
+  const names = el("div", "names", inv.length ? inv.map(i => i[1]).join(", ") : "Empty"); names.title = names.textContent;
+  ie.append(row, names);
+  b.setAttribute("role", "group");
+  b.setAttribute("aria-label", `Health ${hp} of 100. ${n} tokens left. ${inv.length} items.`);
+  b.append(stat("hp" + (hp < 30 ? " low" : ""), "HP", hp, 100, hp / 100), stat("tok", "TOKENS", n, DAILY, n / DAILY), ie);
+  return b;
+}
+function richText(p, text) {
+  text.split(LOOT).forEach((part, i) => {
+    if (!part) return;
+    if (i % 2) { p.append(el("span", "loot " + part.match(/^\[(\w+)\]/)[1], part.trim())); if (/\s$/.test(part)) p.append(" "); }
+    else p.append(part);
+  });
+}
+function botMsg(res) {                       // every narrator response starts with the status bar
+  const m = el("div", "msg bot"); m.append(statusBar());
+  if (res.story) { const p = el("p", "story"); richText(p, res.story); m.append(p); }
+  m.append(el("p", "choice", res.choice));
+  return push(m);
+}
+function setBusy(b) {
+  busy = b; $("#send").disabled = b; $("#act-in").disabled = b;
+  if (!b && !matchMedia("(pointer:coarse)").matches) $("#act-in").focus();
+}
+function grow() { const t = $("#act-in"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 144) + "px"; }
+
+function enter(key) {
+  cur = R[key]; hp = 100; inv = []; hist = [];
+  $("#log").replaceChildren();
+  $("#realm-name").textContent = cur.name;
+  show("game"); paintTokens();
+  const res = shape(cur.intro + " " + pick(cur.ask), cur);
+  botMsg(res); hist.push(res.story + " " + res.choice);
+}
+
+async function send() {
+  const inp = $("#act-in"), text = inp.value.trim();
+  if (busy || !text) return;
+  if (hp <= 0) return say("sys", "[SYSTEM] Your story has ended. Return to the realms to begin again.");
+  if (tokens() <= 0) return say("sys", "[SYSTEM] You are out of Action Tokens for today. Premium unlocks unlimited turns.");
+  inp.value = ""; grow(); setBusy(true);
+  try {
+    say("me", text); hist.push("Player: " + text);
+    const wait = el("div", "msg bot wait"), dots = el("span", "dots");
+    dots.append(el("i"), el("i"), el("i")); wait.append(dots, "The narrator is weaving your fate…"); push(wait);
+    tk.left--; store.set("tokens", tk); paintTokens();
+    const res = await narrate(text);
+    wait.remove();
+    const out = shape(res.story, cur);
+    out.loot.forEach(([r, n]) => gain(r, n));
+    if (res.items) { inv = []; res.items.forEach(s => { const m = String(s).match(/^\[(\w+)\]\s*(.+)$/); m ? gain(m[1].toUpperCase(), m[2]) : gain("COMMON", s); }); }
+    hp = Math.max(0, Math.min(100, Math.round(res.health != null ? res.health : hp + (res.hp || 0))));
+    botMsg(out); hist.push(out.story + " " + out.choice);
+    if (hp <= 0) say("sys", "[SYSTEM] You collapse. Your story ends here.");
+  } finally { setBusy(false); }
+}
+
+/* ---------- EVENTS ---------- */
+$("#act").addEventListener("submit", e => { e.preventDefault(); send(); });
+$("#act-in").addEventListener("input", grow);
+$("#act-in").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+$$("[data-act]").forEach(b => b.addEventListener("click", () => { if (busy) return; $("#act-in").value = b.dataset.act; send(); }));
+$$("[data-realm]").forEach(b => b.addEventListener("click", () => enter(b.dataset.realm)));
+$("#back").addEventListener("click", () => { show("dashboard"); paintTokens(); });
+})();
+</script>
+</body>
+</html>
