@@ -1,344 +1,187 @@
-import json
-import logging
-import os
-import re
-import time
-from pathlib import Path
+-- =====================================================================
+-- MythosAI v2.0  -  Supabase schema
+-- Run the whole file once in: Supabase Dashboard -> SQL Editor.
+-- Safe to re-run (everything is idempotent).
+--
+-- DAILY REFILL: the source of truth is a lazy refill inside consume_token()
+-- (the first request after midnight resets the balance), so it works even if
+-- the cron job below is never enabled. The pg_cron job just keeps the stored
+-- balances tidy for dashboards / support.
+-- =====================================================================
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from supabase import Client, create_client
+-- 1. PROFILES ----------------------------------------------------------
+create table if not exists public.profiles (
+  id               uuid primary key references auth.users (id) on delete cascade,
+  token_balance    integer     not null default 20 check (token_balance >= 0),
+  last_refill_date date        not null default (now() at time zone 'utc')::date,
+  created_at       timestamptz not null default now()
+);
 
-import persona
-from context_tracker import detect_context, find_style_violations, repetition_memory
-from llm import OpenRouterClient
+-- If you already had a profiles table, make sure it has the two columns we need:
+alter table public.profiles add column if not exists token_balance    integer not null default 20;
+alter table public.profiles add column if not exists last_refill_date date    not null default (now() at time zone 'utc')::date;
 
-load_dotenv()
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("mythosai")
+-- Players may READ their own profile. Nobody but the server (service_role) can write it,
+-- so a player can never top up their own tokens from the browser.
+alter table public.profiles enable row level security;
+drop policy if exists "profiles: read own" on public.profiles;
+create policy "profiles: read own" on public.profiles
+  for select to authenticated using (auth.uid() = id);
 
-# ---------------------------------------------------------------- config
-REQUIRED = ("SUPABASE_URL", "SUPABASE_KEY", "OPENROUTER_API_KEY")
-missing = [k for k in REQUIRED if not os.getenv(k)]
-if missing:
-    raise RuntimeError(f"Missing required .env values: {', '.join(missing)}")
+-- Every new sign-up gets a profile automatically ...
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id) values (new.id) on conflict (id) do nothing;
+  return new;
+end $$;
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]  # server-side only; never ship this to the browser
-llm = OpenRouterClient(
-    api_key=os.environ["OPENROUTER_API_KEY"],
-    model=os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3-8b-instruct:free"),
-)
-ALLOWED_ORIGINS = [
-    o.strip()
-    for o in os.getenv("ALLOWED_ORIGINS", "http://127.0.0.1:8000,http://localhost:8000").split(",")
-    if o.strip()
-]
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
 
-# Gameplay limits
-MAX_HEALTH = 100
-MAX_INVENTORY = 20
-MAX_HISTORY = 40          # stored entries (player/narrator pairs, keep even)
-CONTEXT_ENTRIES = 6       # entries sent back to the model each turn
-MAX_HEALTH_LOSS = 40      # per turn
-MAX_HEALTH_GAIN = 20      # per turn
-
-# v1.1 generation limits
-STYLE_RETRIES = int(os.getenv("STYLE_RETRIES", "1"))      # corrective retries per turn (0 disables)
-TURN_BUDGET_S = float(os.getenv("TURN_BUDGET_S", "28"))   # keep BELOW the frontend's 30 s fetch timeout
-
-# Server-side whitelist: the client can no longer inject its own "genre" into the prompt.
-REALMS = {
-    "Neo-Tokyo 2099": {
-        "genre": "Sci-Fi / Cyberpunk",
-        "items": ["Data-Deck", "50 Credits"],
-        "location": "Neon Alleyway",
-    },
-    "Elfridge Chronicles": {
-        "genre": "Grimdark / Fantasy",
-        "items": ["Iron Sword", "Elixir of Life"],
-        "location": "Misty Crossroads",
-    },
-    "Vault 404": {
-        "genre": "Post-Apocalyptic",
-        "items": ["Ration Cube", "Flashlight"],
-        "location": "Blast Door Antechamber",
-    },
-}
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-app = FastAPI(title="MythosAI")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=False,  # no cookies are used
-    allow_methods=["POST", "GET"],
-    allow_headers=["Content-Type"],
-)
+-- ... and users who signed up before this trigger existed are back-filled now.
+insert into public.profiles (id) select id from auth.users on conflict (id) do nothing;
 
 
-# ---------------------------------------------------------------- models
-class StartGameRequest(BaseModel):
-    universe_name: str = Field(min_length=1, max_length=60)
+-- 2. ATOMIC TOKEN FUNCTIONS (called by the server through supabase.rpc) --
+-- consume_token: ONE statement = lazy midnight refill + decrement + guard.
+-- Row-level locking makes concurrent requests safe: two calls racing for the
+-- last token cannot both win. Returns the new balance, or NULL if the player
+-- is out of tokens (or has no profile).
+create or replace function public.consume_token(
+  p_user_id     uuid,
+  p_daily_limit integer default 20,
+  p_tz          text    default 'UTC'
+) returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  v_today   date := (now() at time zone p_tz)::date;
+  v_balance integer;
+begin
+  update public.profiles
+     set token_balance    = case when last_refill_date < v_today
+                                 then p_daily_limit - 1          -- new day: refill, then spend one
+                                 else token_balance - 1 end,
+         last_refill_date = v_today
+   where id = p_user_id
+     and (last_refill_date < v_today or token_balance > 0)
+  returning token_balance into v_balance;
+
+  return v_balance;   -- NULL => no row matched => out of tokens
+end $$;
+
+-- refund_token: gives one token back when a turn fails AFTER it was charged
+-- (LLM down, DB error ...). Never exceeds the daily limit.
+create or replace function public.refund_token(
+  p_user_id     uuid,
+  p_daily_limit integer default 20
+) returns integer
+language plpgsql security definer set search_path = public as $$
+declare v_balance integer;
+begin
+  update public.profiles
+     set token_balance = least(token_balance + 1, p_daily_limit)
+   where id = p_user_id
+  returning token_balance into v_balance;
+  return v_balance;
+end $$;
+
+-- refill_all_tokens: used by the midnight cron job. Only touches profiles that
+-- have not been refilled today, so it can never double-refill a player.
+create or replace function public.refill_all_tokens(
+  p_daily_limit integer default 20,
+  p_tz          text    default 'UTC'
+) returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  v_today date := (now() at time zone p_tz)::date;
+  v_rows  integer;
+begin
+  update public.profiles
+     set token_balance = p_daily_limit, last_refill_date = v_today
+   where last_refill_date < v_today;
+  get diagnostics v_rows = row_count;
+  return v_rows;
+end $$;
+
+-- SECURITY: these must NOT be callable from the browser (anon key), otherwise
+-- anyone could refill or drain tokens. Only the server's service_role may call them.
+revoke all on function public.consume_token(uuid, integer, text)  from public, anon, authenticated;
+revoke all on function public.refund_token(uuid, integer)         from public, anon, authenticated;
+revoke all on function public.refill_all_tokens(integer, text)    from public, anon, authenticated;
+grant execute on function public.consume_token(uuid, integer, text)  to service_role;
+grant execute on function public.refund_token(uuid, integer)         to service_role;
+grant execute on function public.refill_all_tokens(integer, text)    to service_role;
 
 
-class GameTurnRequest(BaseModel):
-    session_id: str = Field(min_length=1, max_length=64)
-    player_action: str = Field(min_length=1, max_length=300)
+-- 3. GAME SESSIONS (server-side memory; serverless functions keep nothing in RAM)
+create table if not exists public.game_sessions (
+  id                 uuid primary key default gen_random_uuid(),
+  user_id            uuid        not null references auth.users (id) on delete cascade,
+  scene_id           text,                                -- scene of the previous turn (NULL = brand-new campaign)
+  hot_buffer         jsonb       not null default '[]',   -- last N turns of the CURRENT scene, verbatim (flushed on scene change)
+  turn_log           jsonb       not null default '[]',   -- turns still waiting for a warm summary (survives a killed background task)
+  warm_summary       text        not null default '',     -- rolling "Scene History Summary", one line per summarised chunk
+  summarized_through integer     not null default 0,      -- highest turn seq already folded into warm_summary (written ONLY by the summariser)
+  turn_count         integer     not null default 0,
+  version            integer     not null default 0,      -- optimistic lock: stops double-tap turns from clobbering each other
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
+);
+create index if not exists game_sessions_user_recent on public.game_sessions (user_id, updated_at desc);
+
+-- Server-only table: RLS on with NO policies = browsers can't touch it; service_role bypasses RLS.
+alter table public.game_sessions enable row level security;
 
 
-# ---------------------------------------------------------------- helpers
-def clean_str(value, limit: int) -> str:
-    return value.strip()[:limit] if isinstance(value, str) else ""
+-- 4. MIDNIGHT REFILL JOB (optional but recommended) --------------------
+-- Enable the extension first: Dashboard -> Database -> Extensions -> pg_cron.
+-- pg_cron runs on the database clock, which is UTC on Supabase.
+-- If REFILL_TIMEZONE in your .env is not UTC, shift the hour so the job fires at
+-- that zone's midnight, and pass the same zone + limit as arguments below.
+create extension if not exists pg_cron;
+select cron.schedule(
+  'mythosai-midnight-refill',
+  '0 0 * * *',
+  $$ select public.refill_all_tokens(20, 'UTC') $$
+);
+-- To remove it later:  select cron.unschedule('mythosai-midnight-refill');
 
 
-def clean_list(value) -> list[str]:
-    """Models sometimes return a bare string instead of a list; never iterate a string."""
-    if isinstance(value, str):
-        value = [value]
-    if not isinstance(value, list):
-        return []
-    return [s for s in (clean_str(i, 40) for i in value) if s]
+-- 5. COLD MEMORY (OPTIONAL - only when you switch COLD_MEMORY_BACKEND=pgvector)
+-- Uncomment, pick the vector size that matches your embedding model, and wire an
+-- embedder into cold_memory.get_cold_memory(). Until then the mock backend is used.
+--
+-- create extension if not exists vector;
+--
+-- create table if not exists public.campaign_milestones (
+--   id         bigint generated always as identity primary key,
+--   session_id uuid not null references public.game_sessions (id) on delete cascade,
+--   content    text not null,
+--   tags       text[] not null default '{}',
+--   embedding  vector(384) not null,          -- 384 = e.g. gte-small / all-MiniLM-L6-v2
+--   created_at timestamptz not null default now()
+-- );
+-- alter table public.campaign_milestones enable row level security;
+-- create index if not exists campaign_milestones_embedding
+--   on public.campaign_milestones using hnsw (embedding vector_cosine_ops);
+--
+-- create or replace function public.match_milestones(
+--   p_session_id uuid, query_embedding vector(384), match_count int default 3, min_similarity float default 0.35
+-- ) returns table (content text, tags text[], similarity float)
+-- language sql stable as $$
+--   select m.content, m.tags, 1 - (m.embedding <=> query_embedding) as similarity
+--     from public.campaign_milestones m
+--    where m.session_id = p_session_id
+--      and 1 - (m.embedding <=> query_embedding) >= min_similarity
+--    order by m.embedding <=> query_embedding
+--    limit match_count
+-- $$;
+-- revoke all on function public.match_milestones(uuid, vector, int, float) from public, anon, authenticated;
+-- grant execute on function public.match_milestones(uuid, vector, int, float) to service_role;
 
 
-def parse_ai_response(raw: str) -> dict:
-    """Recover JSON from fenced, chatty, or plain-prose model output."""
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.IGNORECASE)
-    candidates = [text]
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        candidates.append(text[start : end + 1])
-    for candidate in candidates:
-        try:
-            data = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict):
-            return data
-    if "{" not in text:  # plain prose answer: use it as the story, no state changes
-        return {"story_text": text, "state_updates": {}}
-    raise ValueError("Model returned malformed JSON")
-
-
-def apply_updates(health: int, inventory: list, location: str, updates) -> tuple[int, list, str]:
-    """Never trust model output: validate types and clamp every change."""
-    if not isinstance(updates, dict):
-        updates = {}
-    try:
-        delta = int(updates.get("health_change", 0))
-    except (TypeError, ValueError, OverflowError):
-        delta = 0
-    delta = max(-MAX_HEALTH_LOSS, min(MAX_HEALTH_GAIN, delta))
-    new_health = max(0, min(MAX_HEALTH, health + delta))
-
-    new_inventory = list(inventory)
-    for item in clean_list(updates.get("remove_inventory")):
-        if item in new_inventory:
-            new_inventory.remove(item)
-    for item in clean_list(updates.get("add_inventory")):
-        if item not in new_inventory and len(new_inventory) < MAX_INVENTORY:
-            new_inventory.append(item)
-
-    new_location = clean_str(updates.get("new_location"), 60) or location
-    return new_health, new_inventory, new_location
-
-
-def load_state(session_id: str) -> dict:
-    try:
-        res = supabase.table("game_states").select("*").eq("id", session_id).limit(1).execute()
-    except Exception:
-        log.exception("Supabase read failed")
-        raise HTTPException(status_code=503, detail="Database unavailable. Please try again.")
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Game session not found.")
-    return res.data[0]
-
-
-def build_messages(system_prompt: str, history: list, context_snapshot: str) -> list[dict]:
-    messages = [{"role": "system", "content": system_prompt}]
-    for turn in history[-CONTEXT_ENTRIES:]:
-        if turn.get("is_player"):
-            messages.append({"role": "user", "content": turn["text"]})
-        else:  # replay narrator turns in the JSON shape we ask for, so the model keeps answering in JSON
-            messages.append({
-                "role": "assistant",
-                "content": json.dumps({"story_text": turn["text"], "state_updates": {}}),
-            })
-    messages.append({"role": "user", "content": context_snapshot})
-    return messages
-
-
-def generate_story(messages: list[dict], sampling: persona.Sampling, avoid_openers: list[str]) -> tuple[dict, str]:
-    """One model call, plus at most STYLE_RETRIES corrective retries.
-
-    A retry fires on unusable output (bad JSON / empty story) or on a style violation
-    (boilerplate, repeated openers). Style is a SOFT constraint: if the retry doesn't
-    fix it, we keep the best reply we have rather than failing the player's turn.
-    Every call is capped by TURN_BUDGET_S so the client's own timeout never fires first.
-    """
-    t0 = time.monotonic()
-    temperature = sampling.temperature
-    note = None
-    best = None  # (violation_count, ai_data, story_text)
-
-    for attempt in range(STYLE_RETRIES + 1):
-        remaining = TURN_BUDGET_S - (time.monotonic() - t0)
-        if attempt > 0 and remaining < 8:
-            break
-
-        msgs = messages
-        if note:  # attach the correction to the final user message; avoids a mid-chat system role
-            msgs = messages[:-1] + [{"role": "user", "content": messages[-1]["content"] + "\n\n" + note}]
-
-        try:
-            raw = llm.chat(
-                msgs,
-                temperature=temperature,
-                presence_penalty=sampling.presence_penalty,
-                frequency_penalty=sampling.frequency_penalty,
-                max_tokens=sampling.max_tokens,
-                read_timeout=remaining,
-            )
-        except HTTPException:
-            if best:  # a later call failing shouldn't throw away a usable reply
-                break
-            raise
-
-        try:
-            ai_data = parse_ai_response(raw)
-            story = clean_str(ai_data.get("story_text"), 2000)
-            if not story:
-                raise ValueError("empty story_text")
-        except ValueError:
-            log.warning("Unusable model output (attempt %d): %s", attempt + 1, raw[:300])
-            temperature = min(temperature, 0.5)  # malformed output: retry more conservatively
-            note = persona.JSON_RETRY_NOTE
-            continue
-
-        violations = find_style_violations(story, persona.BANNED_PATTERNS, avoid_openers)
-        if best is None or len(violations) < best[0]:
-            best = (len(violations), ai_data, story)
-        if not violations:
-            break
-        log.info("Style retry (attempt %d): %s", attempt + 1, violations)
-        note = persona.revision_note(violations)
-
-    if best is None:
-        raise HTTPException(status_code=502, detail="The narrator stumbled. Please try again.")
-    return best[1], best[2]
-
-
-# ---------------------------------------------------------------- routes
-# Plain `def` on purpose: FastAPI runs these in a thread pool, so blocking calls
-# (requests, supabase) no longer freeze the whole server.
-@app.post("/api/start-game")
-def start_game(request: StartGameRequest):
-    realm = REALMS.get(request.universe_name.strip())
-    if not realm:
-        raise HTTPException(status_code=400, detail=f"Unknown universe. Choose one of: {', '.join(REALMS)}")
-
-    try:
-        result = supabase.table("game_states").insert({
-            "universe_name": request.universe_name.strip(),
-            "genre": realm["genre"],
-            "health": MAX_HEALTH,
-            "inventory": realm["items"],
-            "current_location": realm["location"],
-            "story_history": [],
-        }).execute()
-    except Exception:
-        log.exception("Supabase insert failed")
-        raise HTTPException(status_code=503, detail="Could not start a new game. Please try again.")
-
-    if not result.data:
-        raise HTTPException(status_code=503, detail="Could not start a new game. Please try again.")
-    row = result.data[0]
-    return {
-        "session_id": row["id"],
-        "health": row["health"],
-        "inventory": row["inventory"],
-        "location": row["current_location"],
-    }
-
-
-@app.post("/api/game-turn")
-def game_turn(request: GameTurnRequest):
-    action = " ".join(request.player_action.split())  # flatten newlines so the player can't fake prompt sections
-    if not action:
-        raise HTTPException(status_code=422, detail="Player action cannot be empty.")
-
-    state = load_state(request.session_id)
-    health = state["health"]
-    inventory = state["inventory"] or []
-    location = state["current_location"]
-    history = state["story_history"] or []
-
-    if health <= 0:
-        raise HTTPException(status_code=409, detail="This story has ended. Start a new game.")
-
-    # --- v1.1 behavioral layers --------------------------------------------
-    ctx = detect_context(action, history, health, MAX_HEALTH)              # 1. who is the player right now?
-    avoid_openers, avoid_phrases = repetition_memory(history)              # 2. what have we been saying?
-    sampling = persona.sampling_for(ctx)                                   # 3. how adventurous should sampling be?
-    system_prompt = persona.build_system_prompt(                           # 4. assemble the prompt
-        state["genre"], ctx, health, MAX_HEALTH, avoid_openers, avoid_phrases
-    )
-    log.info("turn mode=%s streak=%d energy=%s low_hp=%s temp=%.2f signals=%s",
-             ctx.mode.value, ctx.streak, ctx.energy, ctx.low_health, sampling.temperature, ctx.signals)
-
-    context_snapshot = (
-        f"--- CURRENT STATE ---\n"
-        f"Location: {location}\n"
-        f"Current Health: {health}/{MAX_HEALTH}\n"
-        f"Current Inventory: {json.dumps(inventory)}\n"
-        f"--- PLAYER ACTION ---\n"
-        f"The player decides to: {action}"
-    )
-    messages = build_messages(system_prompt, history, context_snapshot)
-
-    ai_data, story_text = generate_story(messages, sampling, avoid_openers)
-
-    new_health, new_inventory, new_location = apply_updates(
-        health, inventory, location, ai_data.get("state_updates")
-    )
-
-    history = (history + [
-        {"is_player": True, "text": action},
-        {"is_player": False, "text": story_text, "mode": ctx.mode.value},  # "mode" feeds next turn's streak
-    ])[-MAX_HISTORY:]
-
-    try:
-        supabase.table("game_states").update({
-            "health": new_health,
-            "inventory": new_inventory,
-            "current_location": new_location,
-            "story_history": history,
-        }).eq("id", request.session_id).execute()
-    except Exception:
-        log.exception("Supabase update failed")
-        raise HTTPException(status_code=503, detail="Could not save your progress. Please try again.")
-
-    return {
-        "story": story_text,
-        "health": new_health,
-        "inventory": new_inventory,
-        "location": new_location,
-    }
-
-
-# Optional: put index.html in a "static" folder next to main.py and the frontend is
-# served from the same origin (no CORS needed, relative /api/... calls just work).
-# Keep this AFTER the API routes.
-STATIC_DIR = Path(__file__).parent / "static"
-if STATIC_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+-- Make PostgREST (the Supabase API) see the new functions/tables immediately.
+notify pgrst, 'reload schema';
