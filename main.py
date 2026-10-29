@@ -105,12 +105,26 @@ RISKY_SUCCESS_CHANCE = float(os.getenv("RISKY_SUCCESS_CHANCE", "0.45"))
 ACTION_STYLES = ("cautious", "aggressive", "risky")
 MIN_TENSION, MAX_TENSION = 1, 5
 
-# Used only if the model forgets or mangles an action, so the UI always gets three buttons.
-FALLBACK_ACTIONS = {
-    "cautious": "Proceed carefully",
-    "aggressive": "Strike first",
-    "risky": "Take the gamble",
-}
+def fallback_actions(location: str = "") -> dict:
+    """Used only if the model forgets or mangles an action, so the UI always gets three buttons."""
+    where = location or "the area"
+    return {
+        "cautious": f"Move quietly and study {where}",
+        "aggressive": "Strike at whatever blocks your way",
+        "risky": "Gamble on the unknown",
+    }
+
+
+# Rotated by the SERVER so two replies in a row can't open the same way (small models copy their own openers).
+OPENING_STYLES = (
+    "a sound the player hears first",
+    "a smell or taste in the air",
+    "a physical sensation on the player's body (cold, pain, weight, vibration)",
+    "a spoken line or a sudden gesture from an NPC or from the threat itself",
+    "a change in the light or the shadows",
+    "something small that is wrong with an object or the room (a trace of the threat)",
+    "the concrete result of the player's action, shown through one detail of the world (never by restating the action)",
+)
 
 # Added next to the player's action when they clicked one of the three buttons.
 STYLE_RESOLUTION = {
@@ -295,6 +309,12 @@ The previous turn was Tension {last_tension}. Move about one level per turn unle
 5. NPCs HAVE GOALS. Each NPC acts on its own goal and current disposition, and changes disposition only because of what the player actually did.
 6. SCENE DISCIPLINE. Change the scene only when the player actually moves somewhere new, and then set "new_scene_id" and "new_location". Otherwise leave both empty.
 
+# NARRATION CRAFT
+- Start with how the WORLD answers, never with the player's action. Do not restate, summarize or echo what the player did. Never use stock transitions: "Your move...", "Your action...", "...carries/takes/leads you into...", "You decide to...".
+- Vary every opening. The THIS TURN block tells you how to open this reply; obey it, and never reuse the opening words of an earlier narration.
+- Specific beats generic: concrete nouns, one precise sensory detail per sentence, named people and objects. No filler such as "the air is thick" or "a sense of dread". Level of specificity wanted: "The smith's hammer stops mid-swing; in the sudden quiet, the forge coals tick like a counting clock."
+- Every reply must add something NEW (a detail, an NPC reaction, a consequence). Never re-describe what was already described.
+
 # OBJECTIVE, CHOICES & CONSEQUENCES
 - Current objective: {objective}
   Keep it radically clear: one concrete goal the player could state in a breath. Tie every scene back to it. Change it only when the player achieves it or the story forces a new one, and then replace it with another single concrete goal.
@@ -426,7 +446,7 @@ def clamp_tension(value, default: int) -> int:
         return default
 
 
-def normalize_actions(raw) -> list[dict]:
+def normalize_actions(raw, location: str = "") -> list[dict]:
     """Always return exactly three {style, label} dicts in cautious/aggressive/risky order.
 
     Accepts the requested array of three strings (mapped by position) or a dict keyed by style.
@@ -446,7 +466,8 @@ def normalize_actions(raw) -> list[dict]:
             label = one_line(value, 80)
             if label:
                 found[style] = label
-    return [{"style": s, "label": found.get(s) or FALLBACK_ACTIONS[s]} for s in ACTION_STYLES]
+    fallback = fallback_actions(location)
+    return [{"style": s, "label": found.get(s) or fallback[s]} for s in ACTION_STYLES]
 
 
 def replay_json(turn: dict) -> str:
@@ -457,9 +478,9 @@ def replay_json(turn: dict) -> str:
     return json.dumps({
         "inner_monologue": one_line(turn.get("thought"), THOUGHT_LIMIT),
         "tension": clamp_tension(turn.get("tension"), 2),
-        "narration": turn.get("text", ""),
+        "narration": scrub_lead_in(turn.get("text", "")),
         "objective": turn.get("objective", ""),
-        "suggested_actions": [actions.get(s) or FALLBACK_ACTIONS[s] for s in ACTION_STYLES],
+        "suggested_actions": [actions.get(s) or fallback_actions()[s] for s in ACTION_STYLES],
         "state_updates": updates,
     }, ensure_ascii=False)
 
@@ -467,13 +488,15 @@ def replay_json(turn: dict) -> str:
 def parse_ai_response(raw: str) -> dict:
     """Recover JSON from fenced, chatty, or plain-prose model output."""
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.IGNORECASE)
-    candidates = [text]
     start, end = text.find("{"), text.rfind("}")
+    attempts = [lambda: json.loads(text)]
+    if start != -1:  # first JSON object, ignoring any chatter after it
+        attempts.append(lambda: json.JSONDecoder().raw_decode(text[start:])[0])
     if start != -1 and end > start:
-        candidates.append(text[start : end + 1])
-    for candidate in candidates:
+        attempts.append(lambda: json.loads(text[start : end + 1]))
+    for attempt in attempts:
         try:
-            data = json.loads(candidate)
+            data = attempt()
         except json.JSONDecodeError:
             continue
         if isinstance(data, dict):
@@ -484,8 +507,15 @@ def parse_ai_response(raw: str) -> dict:
 
 
 def story_of(ai_data: dict) -> str:
-    """The player-facing text. Accepts the old 'story_text' key too."""
-    return clean_str(ai_data.get("narration") or ai_data.get("story_text"), 2000)
+    """The player-facing text (accepts the old 'story_text' key too), trimmed to a sentence end if too long."""
+    for key in ("narration", "story_text"):
+        text = clean_str(ai_data.get(key), 4000)
+        if text:
+            if len(text) > 2000:
+                cut = max(text.rfind(".", 0, 2000), text.rfind("!", 0, 2000), text.rfind("?", 0, 2000))
+                text = text[: cut + 1] if cut > 1000 else text[:2000]
+            return text
+    return ""
 
 
 def salvage_story(raw: str) -> str:
@@ -502,6 +532,66 @@ def salvage_story(raw: str) -> str:
     if cut >= 40:
         text = text[: cut + 1]
     return text if len(text) >= 40 else ""
+
+
+# ================================================================ STYLE GUARD (stock openers)
+# Small models fall into a rut ("Your move ... carries you into a ...") and then copy their own previous
+# replies forever. We (1) rotate the opening style per turn, (2) detect the rut and retry, and (3) as a last
+# resort cut the stock lead-in out, so it can never reach the player or the stored history.
+_CLICHE = re.compile(
+    r"^\W*your (?:move|action|choice|decision|plan|attempt|gambit)\b"
+    r"|\b(?:carries|takes|leads|sends|brings|draws|pulls|propels|ushers) you (?:into|deeper into)\b"
+    r"|^\W*you (?:decide|choose|opt|resolve) to\b",
+    re.IGNORECASE,
+)
+_LEAD_IN = re.compile(
+    r"\byour (?:move|action|choice|decision|plan|attempt|gambit)\b[^.;!?\n]{0,140}?"
+    r"\b(?:carries|takes|leads|sends|brings|draws|pulls|propels|ushers) you (?:into|deeper into)\s+",
+    re.IGNORECASE,
+)
+
+
+def prose_lead(story: str) -> str:
+    """First line of real prose (skips status-bar style header lines like '[HP 80/100 | ...]')."""
+    for line in story.splitlines():
+        line = line.strip()
+        if (len(re.findall(r"[A-Za-z']+", line)) >= 5 and "|" not in line
+                and not line.startswith(("[", "(")) and re.search(r"[.!?…\"”’]$", line)):
+            return line
+    return story.strip()
+
+
+def opener_key(story: str) -> str:
+    """First three words of the reply, lower-cased: 'your move carries'."""
+    return " ".join(re.findall(r"[a-z']+", prose_lead(story)[:120].lower())[:3])
+
+
+def scrub_lead_in(story: str) -> str:
+    """'Your move to X carries you into a dim hall where...' -> 'A dim hall where...' (keeps status bars)."""
+    if not isinstance(story, str):
+        return ""
+    m = _LEAD_IN.search(story[:400])
+    rest = story[m.end():] if m else ""
+    if not m or len(rest) < 40:
+        return story
+    return story[: m.start()] + rest[:1].upper() + rest[1:]
+
+
+def cliche_violations(story: str, recent_keys: set) -> list[str]:
+    lead = prose_lead(story)
+    found = []
+    if _CLICHE.search(lead[:300]):
+        found.append('it opens with the stock phrase ("Your move ... carries you into ...", "You decide to ...")')
+    key = opener_key(story)
+    if key and key in recent_keys:
+        found.append(f'it opens with "{key}" exactly like an earlier reply')
+    return found
+
+
+def pick_opening_style(turns: list) -> str:
+    """A random opening style that was not used in the last three narrator turns."""
+    recent = [t.get("opener") for t in turns if not t.get("is_player")][-3:]
+    return random.choice([o for o in OPENING_STYLES if o not in recent] or list(OPENING_STYLES))
 
 
 # ================================================================ 1. STATE MANAGER
@@ -546,7 +636,8 @@ def apply_updates(health: int, inventory: list, location: str, world: dict, upda
             events.append(f"found {item}")
 
     # location + scene
-    new_location = one_line(updates.get("new_location"), 60) or location
+    proposed = one_line(updates.get("new_location"), 60)
+    new_location = proposed if proposed and proposed.lower() != location.lower() else location
     new_world = {
         "current_scene_id": world["current_scene_id"],
         "quest_flags": dict(world["quest_flags"]),
@@ -610,7 +701,8 @@ STOPWORDS = frozenset(
 
 def keywords(text: str) -> set[str]:
     words = re.findall(r"[a-z0-9']+", (text or "").lower())
-    return {w.rstrip("s") if len(w) > 3 else w for w in words if len(w) >= 3 and w not in STOPWORDS}
+    return {w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
+            for w in words if len(w) >= 3 and w not in STOPWORDS}
 
 
 class ColdMemory:
@@ -776,7 +868,7 @@ def _stripe(session_id: str) -> threading.Lock:
 # One turn at a time per session (a double-tap would run two turns on the same stale state), and one
 # summary job at a time per session.
 _active_turns: set[str] = set()
-_summary_inflight: set[str] = set()
+_summary_inflight: dict[str, float] = {}   # session_id -> time the job was queued
 _active_lock = threading.Lock()
 
 
@@ -809,21 +901,24 @@ def run_summary(session_id: str, upto_n: int, scene_label: str, timeout: float) 
         log.exception("Scene summary failed (it will be retried on a later turn)")
     finally:
         with _active_lock:
-            _summary_inflight.discard(session_id)
+            _summary_inflight.pop(session_id, None)
 
 
 def schedule_summary(tasks: BackgroundTasks, session_id: str, upto_n: int, scene_label: str, started: float) -> None:
+    now = time.monotonic()
     with _active_lock:
-        if session_id in _summary_inflight:
+        queued_at = _summary_inflight.get(session_id)
+        # a job that never reported back (host froze the process, crash) must not block summaries forever
+        if queued_at is not None and now - queued_at < SUMMARY_TIMEOUT_S * 2 + 30:
             return
-        _summary_inflight.add(session_id)
+        _summary_inflight[session_id] = now
     if SUMMARY_MODE == "inline":
-        elapsed = time.monotonic() - started
+        elapsed = now - started
         if elapsed < INLINE_SUMMARY_MAX_START_S:
             run_summary(session_id, upto_n, scene_label, min(SUMMARY_TIMEOUT_S, max(3.0, TURN_BUDGET_S - elapsed - 3)))
-        else:  # too slow a turn: skip, the next turn will trigger it again
+        else:  # too slow a turn: skip, a later turn will trigger it again
             with _active_lock:
-                _summary_inflight.discard(session_id)
+                _summary_inflight.pop(session_id, None)
     else:
         tasks.add_task(run_summary, session_id, upto_n, scene_label, SUMMARY_TIMEOUT_S)
 
@@ -840,17 +935,20 @@ def build_messages(system_prompt: str, hot: list[dict], context_snapshot: str) -
     return messages
 
 
-def generate_story(messages: list[dict], sampling: persona.Sampling, avoid_openers: list[str]) -> tuple[dict, str]:
+def generate_story(messages: list[dict], sampling: persona.Sampling, avoid_openers: list[str],
+                   recent_openers: set) -> tuple[dict, str]:
     """One model call, plus at most STYLE_RETRIES corrective retries.
 
     A retry fires on unusable output (bad JSON / empty narration) or on a style violation
-    (boilerplate, repeated openers). Style is a SOFT constraint: if the retry doesn't
-    fix it, we keep the best reply we have rather than failing the player's turn.
+    (persona rules, the stock "Your move ... carries you into" rut, or a repeated opener).
+    Style is a SOFT constraint: if the retry doesn't fix it, we keep the best reply we have
+    (with any stock lead-in cut out) rather than failing the player's turn.
     If every attempt returns broken JSON, the narration is salvaged from the last one.
     Every call is capped by TURN_BUDGET_S so the client's own timeout never fires first.
     """
     t0 = time.monotonic()
     temperature = sampling.temperature
+    presence = sampling.presence_penalty
     note = None
     best = None  # (violation_count, ai_data, story_text)
     salvaged = ""
@@ -868,7 +966,7 @@ def generate_story(messages: list[dict], sampling: persona.Sampling, avoid_opene
             raw = llm.chat(
                 msgs,
                 temperature=temperature,
-                presence_penalty=sampling.presence_penalty,
+                presence_penalty=presence,
                 frequency_penalty=sampling.frequency_penalty,
                 max_tokens=sampling.max_tokens + JSON_OVERHEAD_TOKENS,
                 read_timeout=remaining,
@@ -877,6 +975,8 @@ def generate_story(messages: list[dict], sampling: persona.Sampling, avoid_opene
             if best:  # a later call failing shouldn't throw away a usable reply
                 break
             raise
+        if not isinstance(raw, str):
+            raw = ""
 
         try:
             ai_data = parse_ai_response(raw)
@@ -891,19 +991,32 @@ def generate_story(messages: list[dict], sampling: persona.Sampling, avoid_opene
             continue
 
         violations = find_style_violations(story, persona.BANNED_PATTERNS, avoid_openers)
-        if best is None or len(violations) < best[0]:
-            best = (len(violations), ai_data, story)
-        if not violations:
+        ruts = cliche_violations(story, recent_openers)
+        total = len(violations) + len(ruts)
+        if best is None or total < best[0]:
+            best = (total, ai_data, story)
+        if total == 0:
             break
-        log.info("Style retry (attempt %d): %s", attempt + 1, violations)
-        note = persona.revision_note(violations)
+        log.info("Style retry (attempt %d): %s %s", attempt + 1, violations, ruts)
+        notes = []
+        if violations:
+            notes.append(persona.revision_note(violations))
+        if ruts:
+            notes.append(
+                "REWRITE the narration: " + "; ".join(ruts) + ". Start with how the world answers the action "
+                "(a sound, a smell, a gesture, a changed detail), with a different first word than any earlier reply. "
+                "Do not restate the player's action."
+            )
+        note = "\n".join(notes)
+        temperature = min(1.0, temperature + 0.15)  # a rut needs more variety, not less
+        presence = min(1.0, presence + 0.2)
 
     if best is None:
         if salvaged:
             log.warning("Using salvaged narration (no state updates this turn)")
-            return {"narration": salvaged, "state_updates": {}}, salvaged
+            return {"narration": salvaged, "state_updates": {}}, scrub_lead_in(salvaged)
         raise HTTPException(status_code=502, detail="The narrator stumbled. Please try again.")
-    return best[1], best[2]
+    return best[1], scrub_lead_in(best[2])
 
 
 # ================================================================ ROUTES
@@ -942,7 +1055,7 @@ def start_game(request: StartGameRequest):
         "story": realm.opening_story,
         "objective": realm.objective,
         "tension": realm.opening_tension,
-        "actions": normalize_actions(realm.opening_actions),
+        "actions": normalize_actions(realm.opening_actions, realm.location),
         "scene_id": doc["world"]["current_scene_id"],
         "quest_flags": doc["world"]["quest_flags"],
         "npc_dispositions": doc["world"]["npc_dispositions"],
@@ -984,6 +1097,8 @@ def _play_turn(request: GameTurnRequest, background_tasks: BackgroundTasks) -> d
     objective = one_line(last.get("objective"), 160) or realm.objective
     last_tension = clamp_tension(last.get("tension"), realm.opening_tension)
     hot = hot_window(mem)
+    opening_style = pick_opening_style(turns)
+    recent_openers = {opener_key(t["text"]) for t in turns[-8:] if not t.get("is_player") and t.get("text")} - {""}
 
     # --- behavioral layers -----------------------------------------------------------------
     ctx = detect_context(action, turns, health, MAX_HEALTH)                # 1. who is the player right now?
@@ -1020,9 +1135,15 @@ def _play_turn(request: GameTurnRequest, background_tasks: BackgroundTasks) -> d
     parts.append("--- WORLD STATE (hard facts, never contradict) ---\n" + json.dumps(world_state, ensure_ascii=False))
     parts.append(f"Objective: {objective}\nPrevious Tension: {last_tension}/5")
     parts.append(f"--- PLAYER ACTION ---\nThe player decides to: {action}{style_hint(style, risky_success)}")
+    parts.append(  # last thing the model reads: recency beats a long system prompt on small models
+        f"--- THIS TURN ---\nOpen the narration (after any status bar the narrator rules require) with: {opening_style}. "
+        'Never restate what the player just did, and never write "Your move", "carries you into" or "You decide to": '
+        "start with how the world answers. Show ONE obstacle, resolve only the action taken, end on an open decision. "
+        "Reply with the JSON object only."
+    )
     messages = build_messages(system_prompt, hot, "\n".join(parts))
 
-    ai_data, story_text = generate_story(messages, sampling, avoid_openers)
+    ai_data, story_text = generate_story(messages, sampling, avoid_openers, recent_openers)
 
     applied = apply_updates(health, inventory, location, world, ai_data.get("state_updates"))
     old_scene = world["current_scene_id"]
@@ -1030,7 +1151,7 @@ def _play_turn(request: GameTurnRequest, background_tasks: BackgroundTasks) -> d
     tension = clamp_tension(ai_data.get("tension"), last_tension)
     objective = one_line(ai_data.get("objective"), 160) or objective
     thought = one_line(ai_data.get("inner_monologue"), THOUGHT_LIMIT)
-    actions = normalize_actions(ai_data.get("suggested_actions"))
+    actions = normalize_actions(ai_data.get("suggested_actions"), applied.location)
     log.info("tension=%d style=%s risky_success=%s scene=%s%s monologue(private)=%s", tension, style,
              risky_success, new_scene, " (changed)" if applied.scene_changed else "", thought)
 
@@ -1046,6 +1167,7 @@ def _play_turn(request: GameTurnRequest, background_tasks: BackgroundTasks) -> d
             "thought": thought,      # private: kept for the model's continuity, never sent to the client
             "actions": {a["style"]: a["label"] for a in actions},
             "updates": applied.record,
+            "opener": opening_style,
         },
     ])[-MAX_HISTORY:]
 
@@ -1058,7 +1180,10 @@ def _play_turn(request: GameTurnRequest, background_tasks: BackgroundTasks) -> d
         save_doc(sid, doc, health=applied.health, inventory=applied.inventory, current_location=applied.location)
 
     game_over = applied.health <= 0
-    if not game_over and (applied.scene_changed or n - doc["summarized_through"] >= SUMMARY_EVERY):
+    unsummarized = n - doc["summarized_through"]
+    # a scene change only forces a summary when there is something worth summarising (avoids a model call
+    # per turn if the narrator flips the location label back and forth)
+    if not game_over and (unsummarized >= SUMMARY_EVERY or (applied.scene_changed and unsummarized >= 2)):
         schedule_summary(background_tasks, sid, n, old_scene if applied.scene_changed else new_scene, started)
 
     return {
